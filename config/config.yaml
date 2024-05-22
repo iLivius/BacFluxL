@@ -1,0 +1,15 @@
+links:
+ checkv_link: https://portal.nersc.gov/CheckV/checkv-db-v1.5.tar.gz
+directories:
+  out_dir: /path/to/output_dir
+  fastq_dir: /path/to/fastq_dir
+  blast_db: /path/to/NCBI_nt
+  eggnog_db: /path/to/eggnog
+  gtdbtk_db: /path/to/GTDB_R214/release214
+  bakta_db: /path/to/bakta/db
+  platon_db: /path/to/platon/db
+resources:
+  threads: 56
+parameters:
+  medaka_model: r1041_e82_400bps_sup_v4.3.0
+  genus:
