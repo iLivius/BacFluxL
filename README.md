@@ -272,7 +272,7 @@ Before running `BacFluxL`, you must edit the `config.yaml` file with a text edit
 
     `BacFluxL` offers two optional parameters: 
     
-    1. `medaka_model`: This refers to the version of the model used for basecalling the long reads. If left blank, the [Medaka](https://github.com/nanoporetech/medaka) correction step will be be skipped.
+    1. `medaka_model`: This refers to the version of the model used for basecalling the long reads. If left blank, the [Medaka](https://github.com/nanoporetech/medaka) correction step will be skipped.
 
     2. `genus`: This parameter allows you to filter the contigs that will eventually be included in the final assembly, based on their taxonomic affiliation at the genus level. If this field is left blank, `BacFluxL` will automatically retain contigs matching the most abundant taxon, as determined by BLAST analysis. This approach is often effective but has limitations. For instance, it might not provide the best resolution at the species level due to the reliance on the sum of the best scores of BLAST hits. Additionally, this method can be misleading if the contaminating organism belongs to the same genus as your target organism, or if you have co-cultured closely related species or strains. If this parameter causes more trouble than benefit in your specific case, simply remove the `genus` option from the `config.yaml` file. 
 
