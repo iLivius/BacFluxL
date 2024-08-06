@@ -3,13 +3,14 @@ links:
 directories:
   out_dir: /path/to/output_dir
   fastq_dir: /path/to/fastq_dir
-  blast_db: /path/to/NCBI_nt
+  blast_db: /path/to/NCBI_core_nt
   eggnog_db: /path/to/eggnog
-  gtdbtk_db: /path/to/GTDB_R214/release214
+  gtdbtk_db: /path/to/GTDB_R220/release220
   bakta_db: /path/to/bakta/db
   platon_db: /path/to/platon/db
 resources:
   threads: 56
 parameters:
+  nt_version: core_nt
   medaka_model: r1041_e82_400bps_sup_v4.3.0
   genus:
