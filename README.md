@@ -53,7 +53,10 @@ This guide gets you started with `BacFluxL`. Here's a quick guide:
     ```
 
 - Configure the `config.yaml`:
-    - Specify the input directory containing ONT reads: *e.g., strain-1_ont.fq.qz.*
+    - Specify the input directory containing ONT reads. When naming your samples:
+        * Avoid using `underscores` (_) in sample names.
+        * Each sample name should end with `_ont` followed by an appropriate extension (e.g. `.fq.gz`).
+        * Be sure to carefully read the [configuration](#configuration) section for full compatibility with the workflow.
 
     - Provide the desired location for the analysis outputs and the path to the following databases:
         * blast_db: path to the [NCBI core nt](https://ftp.ncbi.nlm.nih.gov/blast/db/) database directory
