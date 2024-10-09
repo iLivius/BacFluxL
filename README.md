@@ -53,7 +53,7 @@ This guide gets you started with `BacFluxL`. Here's a quick guide:
     ```
 
 - Configure the `config.yaml`:
-    - Specify the input directory containing ONT reads: *e.g., strain-1_ont.fg.qz.*
+    - Specify the input directory containing ONT reads: *e.g., strain-1_ont.fq.qz.*
 
     - Provide the desired location for the analysis outputs and the path to the following databases:
         * blast_db: path to the [NCBI core nt](https://ftp.ncbi.nlm.nih.gov/blast/db/) database directory
