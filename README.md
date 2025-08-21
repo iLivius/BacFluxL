@@ -347,7 +347,7 @@ The workflow output reflects the steps described in the [description](#descripti
 This work was supported by the [Austrian Science Fund (FWF)](https://www.fwf.ac.at/en/) [Project I6030-B].
 
 ## Citation
-Antonielli, L., Koch, H., Friederike, T., Nagel, M., Sanchez Mejia, A., & Großkinsky, D. K. (2024). BacFluxL: A workflow for genomic analysis of bacterial long reads. Zenodo. https://doi.org/10.5281/zenodo.11243909
+Antonielli, L., Koch, H., Trognitz, T., Nagel, M., Sanchez Mejia, A., & Großkinsky, D. K. (2024). BacFluxL: A workflow for genomic analysis of bacterial long reads. Zenodo. https://doi.org/10.5281/zenodo.11243909
 
 ## References
 1. Blin, K., Shaw, S., Augustijn, H. E., Reitz, Z. L., Biermann, F., Alanjary, M., Fetter, A., Terlouw, B. R., Metcalf, W. W., Helfrich, E. J. N., van Wezel, G. P., Medema, M. H., & Weber, T. (2023). antiSMASH 7.0: New and improved predictions for detection, regulation, chemical structures and visualisation. Nucleic Acids Research, 51(W1), W46–W50. https://doi.org/10.1093/nar/gkad344
