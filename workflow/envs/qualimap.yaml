@@ -1,6 +1,6 @@
-name: gtdbtk
+name: qualimap
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - gtdbtk=2.6.1
+  - qualimap=2.3
