@@ -48,7 +48,7 @@ This guide gets you started with `BacFluxL`. Here's a quick guide:
 
 - Download the latest release:
     ```bash
-    #git command
+    # git command
     git clone https://github.com/iLivius/BacFluxL.git
     ```
 
