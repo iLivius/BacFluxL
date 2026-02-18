@@ -1,6 +1,6 @@
-name: gtdbtk
+name: nanoplot
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - gtdbtk=2.6.1
+  - nanoplot

@@ -1,0 +1,13 @@
+name: dbcan
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - pip
+  - diamond
+  - hmmer
+  - prodigal
+  - pip:
+      - dbcan==5.1.2
+      - "pyhmmer<0.12"
