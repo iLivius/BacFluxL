@@ -5,10 +5,10 @@ __  __  |  __ `/  ___/_  /_   __  /_  / / /_  |/_/_  /
 _  /_/ // /_/ // /__ _  __/   _  / / /_/ /__>  < _  /___
 /_____/ \__,_/ \___/ /_/      /_/  \__,_/ /_/|_| /_____/
                                                                                                             
-BacFluxL v1.1.0 — Genomic Analysis of Bacterial ONT Reads
+BacFluxL v1.1.1 — Genomic Analysis of Bacterial ONT Reads
 
 
-Livio Antonielli, February 2026
+Livio Antonielli, April 2026
 ''')
 
 # Modules:
@@ -33,6 +33,13 @@ DATABASES = ["argannot", "card", "ecoh", "ecoli_vf", "megares", "ncbi", "resfind
 
 # Hardware resources in config file:
 CPUS = config['resources']['threads']
+
+def bakta_locus_tag(sample):
+    tag = "".join(char if char.isalnum() or char in "_.-" else "_" for char in str(sample))
+    tag = tag[:24]
+    if not tag:
+        raise ValueError(f"Unable to derive a valid Bakta locus tag from sample name '{sample}'.")
+    return tag
 
 # Sanity check of genus parameter:
 if config['parameters'] is not None and "genus" in config['parameters']:
@@ -544,18 +551,16 @@ else:
       "logs/consensus_long_{sample}.log"
     shell:
       """
-      # Display model automatic inference output
-      medaka tools \
-        resolve_model \
-        --auto_model consensus_bacteria \
-        {input.filt_long}
+      model=$(medaka tools resolve_model --auto_model consensus_bacteria {input.filt_long})
 
-      # Run medaka with inferred model
+      echo "Auto-inferred Medaka model: $model" > {log}
+
+      medaka_consensus \
         -i {input.filt_long} \
         -d {input.decontam_contigs} \
         -t {resources.cpus} \
-        -m $(medaka tools resolve_model --auto_model consensus_bacteria {input.filt_long}) \
-        -o {output.consensus_dir} > {log} 2>&1
+        -m "$model" \
+        -o {output.consensus_dir} >> {log} 2>&1
       """
 
 rule finalize_contigs:
@@ -592,6 +597,8 @@ rule completeness_and_contamination:
   priority: 0
   shell:
     """
+    mkdir -p {output.checkm_dir}
+
     cp {input.final_contigs} {output.checkm_dir}/{wildcards.sample}.fasta
     
     checkm lineage_wf \
@@ -647,7 +654,8 @@ rule annotation:
   output:
     bakta_dir = directory("05.annotation/bakta/{sample}")
   params:
-    bakta_db = BAKTADB
+    bakta_db = BAKTADB,
+    locus_tag = lambda wc: bakta_locus_tag(wc.sample)
   resources:
     cpus = min(CPUS, 24)
   conda:
@@ -668,7 +676,7 @@ rule annotation:
         --strain {wildcards.sample} \
         --translation-table 11 \
         --min-contig-length 500 \
-        --locus-tag {wildcards.sample} \
+        --locus-tag {params.locus_tag} \
         --prefix {wildcards.sample} \
         --keep-contig-headers \
         --output {output.bakta_dir} \
@@ -1000,9 +1008,7 @@ rule viral_identification:
     checkv_dir = directory("08.phages/checkv/{sample}")
   params:
     viral_groups = "dsDNAphage,NCLDV,RNA,ssDNA,lavidaviridae",
-    min_score = 0.5,
-    checkv_link = config['links']['checkv_link'] if 'checkv_link' in config['links'] else None,
-    db_id = id
+    min_score = 0.5
   resources:
     cpus = min(CPUS, 24)
   conda:
@@ -1027,16 +1033,20 @@ rule viral_identification:
       -j {resources.cpus} \
       all > {log} 2>&1
 
-    if [ -z "{params.checkv_link}" ]; then
-      checkv end_to_end \
-        {output.vs2_dir}/final-viral-combined.fa {output.checkv_dir} \
-        -t {resources.cpus} \
-        -d {input.checkv_db}/{params.db_id} >> {log} 2>&1 
-    else
-        checkv end_to_end {output.vs2_dir}/final-viral-combined.fa {output.checkv_dir} \
-        -t {resources.cpus} \
-        -d {input.checkv_db}/checkv-db-v1.5 >> {log} 2>&1    
+    checkv_rep_files=$(find {input.checkv_db} -type f -path "*/genome_db/checkv_reps.faa" | sort)
+    checkv_rep_file=$(printf "%s\n" "$checkv_rep_files" | head -n 1)
+    checkv_rep_count=$(printf "%s\n" "$checkv_rep_files" | sed '/^$/d' | wc -l)
+    if [ "$checkv_rep_count" -ne 1 ]; then
+      echo "Expected exactly one CheckV database in {input.checkv_db}, found $checkv_rep_count candidate(s)." >> {log}
+      exit 1
     fi
+    checkv_db_dir=$(dirname "$(dirname "$checkv_rep_file")")
+
+    checkv end_to_end \
+      {output.vs2_dir}/final-viral-combined.fa \
+      {output.checkv_dir} \
+      -t {resources.cpus} \
+      -d "$checkv_db_dir" >> {log} 2>&1
     """
 
 rule multiqc:
