@@ -56,6 +56,7 @@ input_mode = None
 
 params = config.get("parameters", {})
 model  = params.get("medaka_model", None)
+flye_input_mode = params.get("flye_input_mode", "auto")
 
 def _is_false(v):
     if isinstance(v, bool): return v is False
@@ -67,20 +68,42 @@ def _is_empty(v):
 
 if _is_false(model):
     print("Medaka disabled via config. Skipping consensus polishing.")
-    input_mode = "--nano-hq"
 elif isinstance(model, str) and model.strip():
     print(f"The 'model' parameter of Medaka is specified with value: '{model}'.")
-    input_mode = "--nano-raw" if "fast" in model else "--nano-hq"
 else:
     # True / missing / empty string => infer model later in the medaka rule
     print("Medaka model will be inferred automatically from FASTQ headers.")
-    input_mode = "--nano-hq"
+
+if flye_input_mode is None or str(flye_input_mode).strip() == "":
+    flye_input_mode = "auto"
+
+FLYE_MODE_KEY = str(flye_input_mode).strip().lower()
+FLYE_MODE_MAP = {
+    "nano-raw": "--nano-raw",
+    "nano-hq": "--nano-hq",
+}
+
+if FLYE_MODE_KEY not in {"auto", *FLYE_MODE_MAP.keys()}:
+    raise ValueError(
+        "Invalid 'flye_input_mode' parameter. Expected one of: auto, nano-raw, nano-hq."
+    )
+
+if FLYE_MODE_KEY == "auto":
+    if isinstance(model, str) and model.strip() and "fast" in model.lower():
+        input_mode = "--nano-raw"
+        print("Flye input mode set automatically to '--nano-raw' based on the explicit Medaka fast model.")
+    else:
+        input_mode = "--nano-hq"
+        print("Flye input mode set automatically to '--nano-hq'.")
+else:
+    input_mode = FLYE_MODE_MAP[FLYE_MODE_KEY]
+    print(f"Flye input mode overridden via config with value: '{input_mode}'.")
 
 # Function to determine final contigs path based on Medaka parameter
 def final_contigs(wc):
-    # medaka_model empty/False => skip
-    m = str(config["parameters"].get("medaka_model", "")).strip().lower()
-    use_medaka = (m not in ["", "false", "none", "0", "no"])
+    # Medaka is skipped only when explicitly disabled in the config.
+    m = config.get("parameters", {}).get("medaka_model", None)
+    use_medaka = not _is_false(m)
     if use_medaka:
         return f"03.post-processing/consensus/{wc.sample}/consensus.fasta"
     else:
@@ -526,12 +549,47 @@ if (
       "logs/consensus_long_{sample}.log"
     shell:
       """
+      model={params.model:q}
+      if [[ ! -e "$model" ]]; then
+        models=$(medaka tools list_models 2>&1) || {{
+          {{
+            echo "ERROR: Unable to query Medaka models in the current conda environment."
+            echo "  medaka_model: $model"
+            echo "  reason: 'medaka tools list_models' failed."
+            echo ""
+            echo "$models"
+          }} > {log}
+          cat {log} >&2
+          exit 1
+        }}
+        if ! printf '%s\n' "$models" | sed -n 's/^Available: //p' | tr ',' '\\n' | sed 's/^ *//; s/ *$//' | grep -Fxq "$model"; then
+          {{
+            echo "ERROR: Invalid Medaka model configured for consensus polishing."
+            echo "  medaka_model: $model"
+            echo "  reason: this model is not available in the current Medaka environment."
+            echo "  next steps: choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to TRUE to auto-infer, set it to FALSE to skip Medaka, or use a Medaka 1.x environment if this exact legacy model is required."
+          }} > {log}
+          cat {log} >&2
+          exit 1
+        fi
+      fi
+
       medaka_consensus \
         -i {input.filt_long} \
         -d {input.decontam_contigs} \
         -t {resources.cpus} \
-        -m {params.model} \
-        -o {output.consensus_dir} > {log} 2>&1
+        -m "$model" \
+        -o {output.consensus_dir} > {log} 2>&1 || {{
+          {{
+            cat {log}
+            echo ""
+            echo "Medaka failed while using the explicit model setting '$model'."
+            echo "Choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to TRUE to auto-infer, or set it to FALSE to skip Medaka."
+          }} > {log}.tmp
+          mv {log}.tmp {log}
+          cat {log} >&2
+          exit 1
+        }}
       """
 else:
   rule:

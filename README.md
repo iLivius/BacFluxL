@@ -16,18 +16,6 @@ BacFluxL v1.1.1
 April 2026
 ```
 
-## Authors and Contributors
-[AIT Austrian Institute of Technology, Center for Health & Bioresources](https://www.ait.ac.at/en/research-topics/bioresources)
-
-- Livio Antonielli
-- Dominik K. Großkinsky
-- Hanna Koch
-- Friederike Trognitz
-
-[IPK Leibniz Institute of Plant Genetics and Crop Plant Research, Cryo and Stress Biology](https://www.ipk-gatersleben.de/forschung/genbank/cryo-und-stressbiologie)
-- Manuela Nagel
-- Alexa Sanchez Mejia
-
 ## Synopsis
 `BacFluxL` is a bioinformatics workflow designed for the processing and analysis of bacterial long-read genomic data produced by Oxford Nanopore Technologies (ONT). The workflow accepts FASTQ files as input, which go through a series of analyses, including quality control, optional error correction of assembled contigs, and functional annotation. In addition, it offers the possibility to infer secondary metabolites, screen for antimicrobial resistance genes, and investigate the presence of plasmids and phages. `BacFluxL` is an adaptation of [`BacFlux`](https://github.com/iLivius/BacFlux), which was originally designed for the analysis of bacterial genomic data sequenced with Illumina. This version focuses solely on the analysis of ONT long reads, offering a more targeted approach for this type of data.
 
@@ -113,8 +101,9 @@ Here's a breakdown of the `BacFluxL` workflow:
     * [Medaka](https://github.com/nanoporetech/medaka) can optionally be used to generate a consensus sequence from reoriented, decontaminated contigs and filtered long reads. While this step can improve sequence accuracy, this is not always the case, especially if ONT reads were basecalled with recent super-accurate models of [Dorado](https://github.com/nanoporetech/dorado). For a detailed discussion, see Ryan Wick’s bioinformatics [blog post](https://rrwick.github.io/2023/12/18/ont-only-accuracy-update.html).
         - **Skip Medaka**: set `medaka_model: FALSE` (case insensitive) in `config.yaml`. Downstream steps will operate on the decontaminated contigs.
         - **Auto-infer model**: set `medaka_model: TRUE`, or leave it **empty**. The model is inferred from FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
-        - **Explicit model**: provide a Medaka model string (e.g. `r1041_e82_400bps_sup_v5.0.0`). The workflow will pass it directly to `medaka_consensus -m`.
-    **Note:** [Flye](https://github.com/fenderglass/Flye) is configured with `--nano-hq` by default; if an explicit Medaka model containing the word **fast** is provided, it switches automatically to `--nano-raw`.
+        - **Explicit model**: provide a Medaka model string (e.g. `r1041_e82_400bps_sup_v5.0.0`). The workflow validates the model against `medaka tools list_models` and then passes it directly to `medaka_consensus -m`.
+        - **If auto-inference fails**: some FASTQ headers do not contain a usable basecaller model reference. In that case, set `medaka_model` explicitly to a model that is available in the installed Medaka environment.
+    **Note:** [Flye](https://github.com/fenderglass/Flye) is configured through `flye_input_mode`. With `flye_input_mode: auto`, Flye uses `--nano-hq` by default; if an explicit Medaka model containing the word **fast** is provided, it switches automatically to `--nano-raw`. To override this behavior, set `flye_input_mode` to `nano-raw` or `nano-hq`.
     * Genome completeness and contamination of long-read assembled bacterial chromosomes are assessed with [CheckM](https://github.com/Ecogenomics/CheckM) using taxon-specific marker sets.
 
 04. **Taxonomic Analysis:**
@@ -289,11 +278,16 @@ Before running `BacFluxL`, you must edit the `config.yaml` file with a text edit
     2. **Medaka model**: This refers to the version of the `medaka_model` used for basecalling the long reads.
     This parameter specifies the [Medaka](https://github.com/nanoporetech/medaka) consensus model used to polish assembled contigs with ONT long reads. Medaka improves assembly accuracy by correcting residual sequencing errors.
         - If set to `FALSE`, the [Medaka](https://github.com/nanoporetech/medaka) polishing step is skipped and downstream analyses operate directly on the decontaminated contigs.
-        - If left **empty** or set to `TRUE`, the workflow try to infer automatically a suitable model from the FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
-        - Alternatively, a specific Medaka model string can be provided explicitly (e.g. `r1041_e82_400bps_sup_v5.0.0`), in which case it is passed directly to `medaka_consensus`.
+        - If left **empty** or set to `TRUE`, the workflow tries to infer automatically a suitable model from the FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
+        - Alternatively, a specific Medaka model string can be provided explicitly (e.g. `r1041_e82_400bps_sup_v5.0.0`), in which case it is validated against `medaka tools list_models` and passed directly to `medaka_consensus`.
+        - If FASTQ headers do not contain a usable basecaller model reference, auto-inference may fail and an explicit Medaka model should be provided instead.
         - **Note:** Medaka polishing is optional and may provide limited or no improvement when reads have already been basecalled using recent super-accurate Dorado models.
     
-    3. **Genus filtering**: `BacFluxL` includes an optional parameter to specify the bacterial `genus` of contigs you wish to retain in the final assembly. If left blank, `BacFluxL` will automatically keep contigs associated with the most abundant taxon, based on relative composition determined through `BLAST` analysis. While this approach generally works well, it has limitations, such as reduced resolution at the species level due to reliance on the cumulative best scores of `BLAST` hits. Additionally, this method may be problematic if the contaminant organism belongs to the same genus as your target organism, or if you are working with co-cultured closely related species or strains. If the `genus` parameter introduces more issues than benefits, simply remove the `genus` option from the `config.yaml` file.
+    3. **Flye input mode**: `flye_input_mode` controls whether [Flye](https://github.com/fenderglass/Flye) is run with `--nano-hq` or `--nano-raw`.
+        - If set to `auto`, Flye uses `--nano-hq` unless an explicit Medaka model containing **fast** is configured, in which case it switches to `--nano-raw`.
+        - If set to `nano-raw` or `nano-hq`, that mode is used regardless of the Medaka model.
+
+    4. **Genus filtering**: `BacFluxL` includes an optional parameter to specify the bacterial `genus` of contigs you wish to retain in the final assembly. If left blank, `BacFluxL` will automatically keep contigs associated with the most abundant taxon, based on relative composition determined through `BLAST` analysis. While this approach generally works well, it has limitations, such as reduced resolution at the species level due to reliance on the cumulative best scores of `BLAST` hits. Additionally, this method may be problematic if the contaminant organism belongs to the same genus as your target organism, or if you are working with co-cultured closely related species or strains. If the `genus` parameter introduces more issues than benefits, simply remove the `genus` option from the `config.yaml` file.
         - **Using** the `genus` parameter: if a contaminant is ascertained to be more abundant than your target organism, you can re-run the workflow after reviewing the assembly [output](#output). Specify the `genus` of the desired bacterial taxon you want to keep in during the re-run. 
         - **Disabling** the `genus` filtering: if either the automatic inference of contaminant contigs or the manual selection of the desired taxon are still not working for you, simply delete the `genus` option from the `parameters`. In this case, only contigs tagged as "no-hit" after `BLAST` search will be filtered out.
 
