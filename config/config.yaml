@@ -13,5 +13,6 @@ resources:
   threads: 24
 parameters:
   nt_version: core_nt
-  medaka_model: r1041_e82_400bps_sup_v4.3.0
+  flye_input_mode: auto # Options: auto, nano-raw, nano-hq
+  medaka_model:
   genus:
