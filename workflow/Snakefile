@@ -5,21 +5,23 @@ __  __  |  __ `/  ___/_  /_   __  /_  / / /_  |/_/_  /
 _  /_/ // /_/ // /__ _  __/   _  / / /_/ /__>  < _  /___
 /_____/ \__,_/ \___/ /_/      /_/  \__,_/ /_/|_| /_____/
                                                                                                             
-BacFluxL v1.1.1 — Genomic Analysis of Bacterial ONT Reads
+BacFluxL v1.2.0
+Genomic Analysis of Bacterial ONT Reads
 
-
-Livio Antonielli, April 2026
+Livio Antonielli, June 2026
 ''')
 
-# Modules:
+# Python is used here for orchestration: checking config, naming files, and
+# choosing optional branches before Snakemake builds the DAG.
 import os
 import sys
 from urllib.parse import urlparse
 
-# Configuration file:
+# Default config. A user-supplied --configfile overrides this when launching.
 configfile: 'config/config.yaml'
 
-# Path to DBs and input/output directories in config file:
+# Pull config values into short names so the rules below read like a workflow,
+# not like repeated dictionary lookups.
 workdir: config['directories']['output_dir']
 INPUTDIR = config['directories']['input_dir']
 BAKTADB = config['directories']['bakta_db']
@@ -28,12 +30,21 @@ DMNDDB = config['directories']['eggnog_db']
 GTDBTKDB = config['directories']['gtdbtk_db']
 PLATONDB = config['directories']['platon_db']
 
-# AMR DBs (ABRicate):
+# ABRicate screens the final assembly against each database listed here.
 DATABASES = ["argannot", "card", "ecoh", "ecoli_vf", "megares", "ncbi", "resfinder", "vfdb"]
 
-# Hardware resources in config file:
+# Global resources and helper paths. Some rules cap CPU use where more threads
+# do not improve runtime.
 CPUS = config['resources']['threads']
+WORKFLOW_DIR = workflow.basedir
+PARAMETERS = config.get('parameters', {}) or {}
 
+# Shared helper used after BlobTools. It reads contig taxonomy assignments and
+# decides which contigs are kept, discarded, or left untouched.
+SELECT_TAXONOMY_SCRIPT = os.path.join(WORKFLOW_DIR, "scripts", "select_contigs_by_taxonomy.py")
+
+# Bakta wants a compact locus tag. This keeps it derived from the sample name
+# but removes characters that could make invalid annotation IDs.
 def bakta_locus_tag(sample):
     tag = "".join(char if char.isalnum() or char in "_.-" else "_" for char in str(sample))
     tag = tag[:24]
@@ -41,42 +52,105 @@ def bakta_locus_tag(sample):
         raise ValueError(f"Unable to derive a valid Bakta locus tag from sample name '{sample}'.")
     return tag
 
-# Sanity check of genus parameter:
-if config['parameters'] is not None and "genus" in config['parameters']:
-    genus = config['parameters']["genus"]
-    if genus is not None and len(genus) > 0:
-        print(f"The 'genus' parameter is specified in the config file with value: '{genus}'.")
-    else:
-        print("The 'genus' parameter value is not specified in the config file and will be inferred automatically.")
-else:
-    print("The 'genus' parameter is not present in the config file.")
+# Normalize genus lists and paths for the decontamination selector. YAML can
+# provide these as empty values, strings, or lists; the script receives text.
+def _as_decontam_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, set)):
+        return ";".join(str(item).strip() for item in value if str(item).strip())
+    return str(value).strip()
 
-# Sanity check of Medaka parameter:
+
+# Interpret boolean-like config values explicitly, instead of relying on YAML
+# guessing alone.
+def _config_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean config value: {value!r}")
+
+
+# Build the complete decontamination configuration once. The old "genus"
+# parameter is translated so older configs still behave sensibly.
+def _decontam_settings(default_mode):
+    params = config.get("parameters", {}) or {}
+    settings = dict(params.get("decontamination") or {})
+    if not settings:
+        legacy_genus = params.get("genus", None)
+        if legacy_genus is not None and str(legacy_genus).strip():
+            settings = {"mode": "include", "include_genera": legacy_genus}
+        elif "genus" in params:
+            settings = {"mode": "auto"}
+        else:
+            settings = {"mode": default_mode}
+
+    mode = str(settings.get("mode", default_mode) or default_mode).strip().lower()
+    if mode not in {"auto", "include", "exclude", "off"}:
+        raise ValueError("Invalid decontamination.mode. Expected one of: auto, include, exclude, off.")
+    settings["mode"] = mode
+    settings["include_genera"] = _as_decontam_text(settings.get("include_genera", ""))
+    settings["include_genera_by_sample"] = _as_decontam_text(settings.get("include_genera_by_sample", ""))
+    settings["exclude_genera"] = _as_decontam_text(settings.get("exclude_genera", ""))
+    settings["exclude_genera_file"] = _as_decontam_text(settings.get("exclude_genera_file", ""))
+    settings["sample_overrides"] = _as_decontam_text(settings.get("sample_overrides", ""))
+    settings["discard_no_hit"] = str(_config_bool(settings.get("discard_no_hit"), False)).lower()
+    return settings
+
+
+# This is the single source of truth for how BlobTools classifications are used
+# to retain or discard contigs.
+DECONTAMINATION = _decontam_settings("auto")
+print(
+    "Decontamination mode: "
+    f"{DECONTAMINATION['mode']} (discard_no_hit={DECONTAMINATION['discard_no_hit']})."
+)
+
+# Medaka and Flye choices are linked. Old/noisy reads may need Flye --nano-raw;
+# modern high-quality reads usually fit --nano-hq.
 input_mode = None
 
+# Read long-read assembly and polishing options from config.
 params = config.get("parameters", {})
 model  = params.get("medaka_model", None)
 flye_input_mode = params.get("flye_input_mode", "auto")
 
+# Treat common false-like values as "skip Medaka".
 def _is_false(v):
     if isinstance(v, bool): return v is False
     if v is None: return False
-    return str(v).strip().lower() in {"false","0","no","off"}
+    return str(v).strip().lower() in {"false","0","no","off","none"}
 
+# Empty values mean "let Medaka infer the model" rather than "disable Medaka".
 def _is_empty(v):
     return v is None or (isinstance(v, str) and v.strip() == "")
 
+# A real model name is anything that is not an alias for auto-inference or skip.
+def _has_explicit_medaka_model(v):
+    if isinstance(v, bool) or v is None:
+        return False
+    return str(v).strip().lower() not in {"", "true", "1", "yes", "on", "auto", "false", "0", "no", "off", "none"}
+
 if _is_false(model):
     print("Medaka disabled via config. Skipping consensus polishing.")
-elif isinstance(model, str) and model.strip():
+elif _has_explicit_medaka_model(model):
     print(f"The 'model' parameter of Medaka is specified with value: '{model}'.")
 else:
-    # True / missing / empty string => infer model later in the medaka rule
+    # TRUE / auto / missing / empty string => infer model later in the medaka rule
     print("Medaka model will be inferred automatically from FASTQ headers.")
 
+# Empty flye_input_mode is treated like auto, because that is the safest default
+# for regular ONT assemblies.
 if flye_input_mode is None or str(flye_input_mode).strip() == "":
     flye_input_mode = "auto"
 
+# Map simple config words to the exact Flye command-line flags.
 FLYE_MODE_KEY = str(flye_input_mode).strip().lower()
 FLYE_MODE_MAP = {
     "nano-raw": "--nano-raw",
@@ -88,8 +162,10 @@ if FLYE_MODE_KEY not in {"auto", *FLYE_MODE_MAP.keys()}:
         "Invalid 'flye_input_mode' parameter. Expected one of: auto, nano-raw, nano-hq."
     )
 
+# In auto mode, only an explicit fast Medaka model switches Flye to --nano-raw.
+# Otherwise the workflow assumes high-quality ONT reads and uses --nano-hq.
 if FLYE_MODE_KEY == "auto":
-    if isinstance(model, str) and model.strip() and "fast" in model.lower():
+    if _has_explicit_medaka_model(model) and "fast" in str(model).lower():
         input_mode = "--nano-raw"
         print("Flye input mode set automatically to '--nano-raw' based on the explicit Medaka fast model.")
     else:
@@ -99,7 +175,8 @@ else:
     input_mode = FLYE_MODE_MAP[FLYE_MODE_KEY]
     print(f"Flye input mode overridden via config with value: '{input_mode}'.")
 
-# Function to determine final contigs path based on Medaka parameter
+# Downstream rules always ask this helper for the final assembly path. That way
+# the rest of the workflow does not need to know whether Medaka was used.
 def final_contigs(wc):
     # Medaka is skipped only when explicitly disabled in the config.
     m = config.get("parameters", {}).get("medaka_model", None)
@@ -109,7 +186,8 @@ def final_contigs(wc):
     else:
         return f"03.post-processing/contaminants/{wc.sample}/assembly_decontam.fasta"
 
-# Sanity check of checkv db link parameter:
+# CheckV database handling: use a provided tar.gz link when present, otherwise
+# leave CheckV to download its default database.
 global id
 id = None
 
@@ -125,9 +203,10 @@ else:
     sys.stderr.write(f"The checkv_link parameter is not present. Please, check the config file.\n")
     sys.exit(0)
 
-# Import FASTQ files from ONT input dir
+# Long-read samples are discovered from files named sample_ont.ext.
 SAMPLES, EXTENSIONS = glob_wildcards(os.path.join(INPUTDIR, '{sample}_ont.{extn}'))
 
+# Stop before rule execution if no ONT files are present.
 if SAMPLES:
     for sample in sorted(SAMPLES):
         print(f"Sample {sample} will be processed.")
@@ -135,7 +214,8 @@ else:
     sys.stderr.write(f"No files in {INPUTDIR}. Please, check the directory.\n")
     sys.exit(0)
 
-# Check if ONT files have nonunique extension:
+# Require one ONT FASTQ extension for all samples so wildcard paths stay
+# deterministic.
 if EXTENSIONS:
     for extension in EXTENSIONS:
         if extension.endswith(("fastq", "fq", "fastq.gz", "fq.gz")):
@@ -150,7 +230,7 @@ else:
     sys.stderr.write("No suitable file extension found.\n")
     sys.exit(0)
 
-# Create sample objects:
+# Reusable wildcard pattern for ONT input files.
 EXTN = EXTENSIONS[0]
 ONT = '{sample}_ont.' + EXTN
 
@@ -470,65 +550,48 @@ rule blob_table:
       --hits > {log} 2>&1
     """
   
-# Execute either one rule or another according to presence/absence of 'genus' parameter
-if "genus" in config['parameters'] and config['parameters']['genus'] is not None and len(config['parameters']['genus']) > 0:
-  rule:
-    input:
-      bestscore = "03.post-processing/contaminants/{sample}/bestscore.blob.blobDB.table.txt",
-      fixed_contigs = "03.post-processing/fix_start/{sample}/{sample}_fixed.fasta"
-    output:
-      abund = "03.post-processing/contaminants/{sample}/{sample}_composition.txt",
-      list = "03.post-processing/contaminants/{sample}/contigs.list",
-      decontam_contigs = "03.post-processing/contaminants/{sample}/assembly_decontam.fasta"
-    params:
-      genus = config['parameters']['genus']    
-    priority: 0
-    shell:
-      """
-      for i in $(cat {input.bestscore} | sed '1,11d' | cut -f 22 | sort -u); do \
-        cat {input.bestscore} | sed '1,11d' | awk -v var=$i 'BEGIN {{printf "%s%s", var, ": "}} $22 == var {{count++}} END {{printf "%.2f\\n", count/NR}}'; \
-      done > {output.abund}
-
-      echo "Sample {wildcards.sample} composition:"
-      cat {output.abund}
-      
-      awk -v var="{params.genus}" 'tolower($22) ~ tolower("[:alpha:]*"var) {{print $1}}' {input.bestscore} > {output.list}
-      
-      grep -A1 -f {output.list} {input.fixed_contigs} | sed '/--/d' > {output.decontam_contigs}
-      """
-else:
-  rule:
-    input:
-      bestscore = "03.post-processing/contaminants/{sample}/bestscore.blob.blobDB.table.txt",
-      fixed_contigs = "03.post-processing/fix_start/{sample}/{sample}_fixed.fasta"
-    output:
-      abund = "03.post-processing/contaminants/{sample}/{sample}_composition.txt",
-      list = "03.post-processing/contaminants/{sample}/contigs.list",
-      decontam_contigs = "03.post-processing/contaminants/{sample}/assembly_decontam.fasta"
-    priority: 0
-    shell:
-      """
-      for i in $(cat {input.bestscore} | sed '1,11d' | cut -f 22 | sort -u); do \
-        cat {input.bestscore} | sed '1,11d' | awk -v var=$i 'BEGIN {{printf "%s%s", var, ": "}} $22 == var {{count++}} END {{printf "%.2f\\n", count/NR}}'; \
-      done > {output.abund}
-
-      echo "Sample {wildcards.sample} composition:"
-      cat {output.abund}
-
-      for i in $(cat {output.abund} | sort -t':' -k2 -nr | cut -d':' -f1 | sed -n '1p' | sed -e 's/Para//;s/Pseudo//;s/Paen//' | tr '[:upper:]' '[:lower:]'); do \
-        awk -v var="$i" 'tolower($22) ~ tolower("[:alpha:]*"var) {{print $1}}' {input.bestscore}; \
-      done > {output.list}
-
-      grep -A1 -f {output.list} {input.fixed_contigs} | sed '/--/d' > {output.decontam_contigs}
-      """
+rule select_contigs:
+  input:
+    bestscore = "03.post-processing/contaminants/{sample}/bestscore.blob.blobDB.table.txt",
+    fixed_contigs = "03.post-processing/fix_start/{sample}/{sample}_fixed.fasta"
+  output:
+    abund = "03.post-processing/contaminants/{sample}/{sample}_composition.txt",
+    list = "03.post-processing/contaminants/{sample}/contigs.list",
+    decisions = "03.post-processing/contaminants/{sample}/contig_taxonomy_decisions.tsv",
+    decontam_contigs = "03.post-processing/contaminants/{sample}/assembly_decontam.fasta"
+  params:
+    selector = SELECT_TAXONOMY_SCRIPT,
+    mode = DECONTAMINATION["mode"],
+    include_genera = DECONTAMINATION["include_genera"],
+    include_genera_by_sample = DECONTAMINATION["include_genera_by_sample"],
+    exclude_genera = DECONTAMINATION["exclude_genera"],
+    exclude_genera_file = DECONTAMINATION["exclude_genera_file"],
+    sample_overrides = DECONTAMINATION["sample_overrides"],
+    discard_no_hit = DECONTAMINATION["discard_no_hit"]
+  priority: 0
+  shell:
+    """
+    python {params.selector:q} \
+      --bestscore {input.bestscore:q} \
+      --contigs {input.fixed_contigs:q} \
+      --sample {wildcards.sample:q} \
+      --mode {params.mode:q} \
+      --include-genera {params.include_genera:q} \
+      --include-genera-by-sample {params.include_genera_by_sample:q} \
+      --exclude-genera {params.exclude_genera:q} \
+      --exclude-genera-file {params.exclude_genera_file:q} \
+      --sample-overrides {params.sample_overrides:q} \
+      --discard-no-hit {params.discard_no_hit:q} \
+      --output-list {output.list:q} \
+      --output-fasta {output.decontam_contigs:q} \
+      --composition {output.abund:q} \
+      --decisions {output.decisions:q}
+    """
 
 # Conditional rule execution according to presence/absence of 'medaka_model' parameter
 if (
     "medaka_model" in config.get("parameters", {})
-    and not isinstance(config["parameters"]["medaka_model"], bool)
-    and config["parameters"]["medaka_model"] is not None
-    and str(config["parameters"]["medaka_model"]).strip().lower()
-        not in {"", "false", "no", "0", "off"}
+    and _has_explicit_medaka_model(config["parameters"]["medaka_model"])
 ):
   rule:
     input:
@@ -567,7 +630,7 @@ if (
             echo "ERROR: Invalid Medaka model configured for consensus polishing."
             echo "  medaka_model: $model"
             echo "  reason: this model is not available in the current Medaka environment."
-            echo "  next steps: choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to TRUE to auto-infer, set it to FALSE to skip Medaka, or use a Medaka 1.x environment if this exact legacy model is required."
+            echo "  next steps: choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to auto to infer from FASTQ headers, set it to FALSE to skip Medaka, or use a Medaka 1.x environment if this exact legacy model is required."
           }} > {log}
           cat {log} >&2
           exit 1
@@ -584,7 +647,7 @@ if (
             cat {log}
             echo ""
             echo "Medaka failed while using the explicit model setting '$model'."
-            echo "Choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to TRUE to auto-infer, or set it to FALSE to skip Medaka."
+            echo "Choose a model from 'medaka tools list_models', set 'parameters.medaka_model' to auto to infer from FASTQ headers, or set it to FALSE to skip Medaka."
           }} > {log}.tmp
           mv {log}.tmp {log}
           cat {log} >&2
@@ -649,9 +712,9 @@ rule completeness_and_contamination:
   conda:
     "envs/checkm.yaml"
   message:
-    "--- CheckM: Assessment of genome completenness and contamination. ---"
+    "--- CheckM: Assessment of genome completeness and contamination. ---"
   log:
-    "logs/completenness_and_contamination_{sample}.log"
+    "logs/completeness_and_contamination_{sample}.log"
   priority: 0
   shell:
     """
@@ -1141,11 +1204,44 @@ sample_names_replace:
   '^01\.pre-processing \| read_qc \| ([^|]+) \| filt_read_qc \| \1$': 'filtered read QC | \1'
   '^01\.pre-processing \| read_qc \| ([^|]+) \| raw_read_qc \| \1$':  'raw read QC | \1'
 
-  '^03\.post-processing \| mapping_evaluation \| ([^|]+) \| \1_map$': 'map QC pt.1 | \1'
-  '^03\.post-processing \| mapping_evaluation \| ([^|]+) \| raw_data$': 'map QC pt.2 | \1'
+  '^03\.post-processing \| mapping_evaluation \| ([^|]+) \| \1_map$': 'mapping QC | \1'
+  '^03\.post-processing \| mapping_evaluation \| ([^|]+) \| raw_data$': 'mapping QC | \1'
 
   '^05\.annotation \| bakta \| ([^|]+) \| \1$': 'annotation | \1'
 EOF
+
+    REPORT_INPUT_DIR="{output.multiqc_dir}/multiqc_inputs"
+    rm -rf "$REPORT_INPUT_DIR"
+    mkdir -p "$REPORT_INPUT_DIR/checkm" "$REPORT_INPUT_DIR/gtdbtk"
+
+    for checkm_dir in {input.checkm_dir}; do
+      sample=$(basename "$checkm_dir")
+      mkdir -p "$REPORT_INPUT_DIR/checkm/$sample"
+      awk -F '\t' -v OFS='\t' -v sample="$sample" '
+        NR == 1 {{ print; next }}
+        $1 == sample {{ $1 = "completeness | " sample }}
+        {{ print }}
+      ' "$checkm_dir/checkm_stats.tsv" > "$REPORT_INPUT_DIR/checkm/$sample/checkm_stats.tsv"
+    done
+
+    for gtdbtk_dir in {input.gtdbtk_dir}; do
+      sample=$(basename "$gtdbtk_dir")
+      summary=""
+      if [[ -d "$gtdbtk_dir/classify" ]]; then
+        summary=$(find "$gtdbtk_dir/classify" -maxdepth 1 -name 'gtdbtk.*.summary.tsv' -print -quit)
+      fi
+      if [[ -z "$summary" ]]; then
+        summary=$(find "$gtdbtk_dir" -maxdepth 1 -name 'gtdbtk.*.summary.tsv' -print -quit)
+      fi
+      if [[ -n "$summary" ]]; then
+        mkdir -p "$REPORT_INPUT_DIR/gtdbtk/$sample"
+        awk -F '\t' -v OFS='\t' -v sample="$sample" '
+          NR == 1 {{ print; next }}
+          $1 == sample {{ $1 = "taxonomy | " sample }}
+          {{ print }}
+        ' "$summary" > "$REPORT_INPUT_DIR/gtdbtk/$sample/$(basename "$summary")"
+      fi
+    done
 
     IGNORE_ARG=""
     if find {input.nanoplot_raw_dir} {input.nanoplot_filt_dir} \
@@ -1160,8 +1256,8 @@ EOF
       {input.nanoplot_raw_dir} \
       {input.nanoplot_filt_dir} \
       {input.qualimap_dir} \
-      {input.checkm_dir} \
-      {input.gtdbtk_dir} \
+      "$REPORT_INPUT_DIR/checkm" \
+      "$REPORT_INPUT_DIR/gtdbtk" \
       {input.bakta_dir} \
       --outdir {output.multiqc_dir} \
       --filename multiqc_report.html > {log} 2>&1

@@ -14,5 +14,12 @@ resources:
 parameters:
   nt_version: core_nt
   flye_input_mode: auto # Options: auto, nano-raw, nano-hq
-  medaka_model:
-  genus:
+  medaka_model: auto # auto/TRUE/empty = infer from FASTQ headers; FALSE = skip; explicit model = use that model
+  decontamination:
+    mode: auto # Options: auto, include, exclude, off
+    discard_no_hit: true
+    include_genera:
+    include_genera_by_sample:
+    exclude_genera:
+    exclude_genera_file:
+    sample_overrides:

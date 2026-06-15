@@ -11,9 +11,9 @@ __  __  |  __ `/  ___/_  /_   __  /_  / / /_  |/_/_  /
 _  /_/ // /_/ // /__ _  __/   _  / / /_/ /__>  < _  /___
 /_____/ \__,_/ \___/ /_/      /_/  \__,_/ /_/|_| /_____/
                                                                                                             
-BacFluxL v1.1.1
+BacFluxL v1.2.0
 
-April 2026
+June 2026
 ```
 
 ## Synopsis
@@ -43,7 +43,7 @@ This guide gets you started with `BacFluxL`. Here's a quick guide:
 - Configure the `config.yaml`:
     - Specify the input directory containing ONT reads. When naming your samples:
         * Avoid using `underscores` in sample names.
-        * Each sample name should end with `_ont` followed by an appropriate extension (e.g. `.fq.gz`).
+        * Each sample name should end with `_ont` followed by an appropriate extension (_e.g._ `.fq.gz`).
         * Be sure to carefully read the [configuration](#configuration) section for full compatibility with the workflow.
 
     - Provide the desired location for the analysis outputs and the path to the following databases:
@@ -63,13 +63,13 @@ This guide gets you started with `BacFluxL`. Here's a quick guide:
 
 - Run `BacFluxL`. Within the main workflow directory, launch the pipeline as follows:
    ```bash
-  snakemake --sdm conda --jobs 2 --cores 24
+  snakemake --sdm conda --jobs 2 --cores 12
   ```
 
     This example uses the following options:
     - --sdm conda: use Conda for dependency management
     - --jobs 2: maximum number of jobs executed in parallel
-    - --cores 24: maximum number of local CPUs used
+    - --cores 12: maximum number of local CPUs used
 
 Refer to the [installation](#installation), [configuration](#configuration) and [running BacFluxL](#running-bacfluxl) sections for detailed instructions.
 
@@ -92,16 +92,16 @@ Here's a breakdown of the `BacFluxL` workflow:
     * Filtered ONT reads are assembled using [Flye](https://github.com/fenderglass/Flye). For more details, see the next step.
 
 03. **Replicon Reorientation, Decontamination, Error Correction, and Completeness Assessment:**
-    * After assembly, replicons are reoriented using [dnaapler](https://github.com/gbouras13/dnaapler) to start at a canonical position, i.e. dnaA for chromosomes, repA for plasmids, and terL for bacteriophages.
-    * To avoid undesired reorientation of naturally linear replicons (e.g. linear chromosomes in *Streptomyces* or *Borrelia* spp., or linear plasmids), [dnaapler](https://github.com/gbouras13/dnaapler) is applied only to circular contigs. 
+    * After assembly, replicons are reoriented using [dnaapler](https://github.com/gbouras13/dnaapler) to start at a canonical position, _i.e._ dnaA for chromosomes, repA for plasmids, and terL for bacteriophages.
+    * To avoid undesired reorientation of naturally linear replicons (_e.g._ linear chromosomes in *Streptomyces* or *Borrelia* spp., or linear plasmids), [dnaapler](https://github.com/gbouras13/dnaapler) is applied only to circular contigs. 
     * Filtered reads are mapped back to contigs using [minimap2](https://github.com/lh3/minimap2) and [samtools](https://github.com/samtools/samtools).
     * Quality control of the assembly is performed with [QualiMap](http://qualimap.conesalab.org/).
     * Local alignments of contigs are performed against the [NCBI core nt](https://ftp.ncbi.nlm.nih.gov/blast/db/) database using [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/).
     * Contaminant contigs are checked with [BlobTools](https://github.com/DRL/blobtools). Unless otherwise specified (see [configuration](#configuration) section for more details), the output of this step will be parsed automatically to discard contaminants. 
     * [Medaka](https://github.com/nanoporetech/medaka) can optionally be used to generate a consensus sequence from reoriented, decontaminated contigs and filtered long reads. While this step can improve sequence accuracy, this is not always the case, especially if ONT reads were basecalled with recent super-accurate models of [Dorado](https://github.com/nanoporetech/dorado). For a detailed discussion, see Ryan Wick’s bioinformatics [blog post](https://rrwick.github.io/2023/12/18/ont-only-accuracy-update.html).
         - **Skip Medaka**: set `medaka_model: FALSE` (case insensitive) in `config.yaml`. Downstream steps will operate on the decontaminated contigs.
-        - **Auto-infer model**: set `medaka_model: TRUE`, or leave it **empty**. The model is inferred from FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
-        - **Explicit model**: provide a Medaka model string (e.g. `r1041_e82_400bps_sup_v5.0.0`). The workflow validates the model against `medaka tools list_models` and then passes it directly to `medaka_consensus -m`.
+        - **Auto-infer model**: set `medaka_model: auto`. `TRUE` and an empty value are also accepted aliases. The model is inferred from FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
+        - **Explicit model**: provide a Medaka model string (_e.g._ `r1041_e82_400bps_sup_v5.0.0`). The workflow validates the model against `medaka tools list_models` and then passes it directly to `medaka_consensus -m`.
         - **If auto-inference fails**: some FASTQ headers do not contain a usable basecaller model reference. In that case, set `medaka_model` explicitly to a model that is available in the installed Medaka environment.
     **Note:** [Flye](https://github.com/fenderglass/Flye) is configured through `flye_input_mode`. With `flye_input_mode: auto`, Flye uses `--nano-hq` by default; if an explicit Medaka model containing the word **fast** is provided, it switches automatically to `--nano-raw`. To override this behavior, set `flye_input_mode` to `nano-raw` or `nano-hq`.
     * Genome completeness and contamination of long-read assembled bacterial chromosomes are assessed with [CheckM](https://github.com/Ecogenomics/CheckM) using taxon-specific marker sets.
@@ -278,8 +278,8 @@ Before running `BacFluxL`, you must edit the `config.yaml` file with a text edit
     2. **Medaka model**: This refers to the version of the `medaka_model` used for basecalling the long reads.
     This parameter specifies the [Medaka](https://github.com/nanoporetech/medaka) consensus model used to polish assembled contigs with ONT long reads. Medaka improves assembly accuracy by correcting residual sequencing errors.
         - If set to `FALSE`, the [Medaka](https://github.com/nanoporetech/medaka) polishing step is skipped and downstream analyses operate directly on the decontaminated contigs.
-        - If left **empty** or set to `TRUE`, the workflow tries to infer automatically a suitable model from the FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
-        - Alternatively, a specific Medaka model string can be provided explicitly (e.g. `r1041_e82_400bps_sup_v5.0.0`), in which case it is validated against `medaka tools list_models` and passed directly to `medaka_consensus`.
+        - If set to `auto`, `TRUE`, or left **empty**, the workflow tries to infer automatically a suitable model from the FASTQ headers using `medaka tools resolve_model --auto_model consensus_bacteria`.
+        - Alternatively, a specific Medaka model string can be provided explicitly (_e.g._ `r1041_e82_400bps_sup_v5.0.0`), in which case it is validated against `medaka tools list_models` and passed directly to `medaka_consensus`.
         - If FASTQ headers do not contain a usable basecaller model reference, auto-inference may fail and an explicit Medaka model should be provided instead.
         - **Note:** Medaka polishing is optional and may provide limited or no improvement when reads have already been basecalled using recent super-accurate Dorado models.
     
@@ -287,9 +287,27 @@ Before running `BacFluxL`, you must edit the `config.yaml` file with a text edit
         - If set to `auto`, Flye uses `--nano-hq` unless an explicit Medaka model containing **fast** is configured, in which case it switches to `--nano-raw`.
         - If set to `nano-raw` or `nano-hq`, that mode is used regardless of the Medaka model.
 
-    4. **Genus filtering**: `BacFluxL` includes an optional parameter to specify the bacterial `genus` of contigs you wish to retain in the final assembly. If left blank, `BacFluxL` will automatically keep contigs associated with the most abundant taxon, based on relative composition determined through `BLAST` analysis. While this approach generally works well, it has limitations, such as reduced resolution at the species level due to reliance on the cumulative best scores of `BLAST` hits. Additionally, this method may be problematic if the contaminant organism belongs to the same genus as your target organism, or if you are working with co-cultured closely related species or strains. If the `genus` parameter introduces more issues than benefits, simply remove the `genus` option from the `config.yaml` file.
-        - **Using** the `genus` parameter: if a contaminant is ascertained to be more abundant than your target organism, you can re-run the workflow after reviewing the assembly [output](#output). Specify the `genus` of the desired bacterial taxon you want to keep in during the re-run. 
-        - **Disabling** the `genus` filtering: if either the automatic inference of contaminant contigs or the manual selection of the desired taxon are still not working for you, simply delete the `genus` option from the `parameters`. In this case, only contigs tagged as "no-hit" after `BLAST` search will be filtered out.
+    4. **Decontamination controls**: `BacFluxL` uses a taxonomy selector for the `BLAST`/`BlobTools` decontamination step. The default behavior is:
+
+        ```yaml
+        decontamination:
+          mode: auto
+          discard_no_hit: true
+          include_genera:
+          include_genera_by_sample:
+          exclude_genera:
+          exclude_genera_file:
+          sample_overrides:
+        ```
+
+        - **mode**: controls how contigs are selected. Use `auto` to keep the most abundant genus inferred from the BlobTools output, `include` to keep only user-defined genera, `exclude` to remove user-defined genera, or `off` to skip genus-based filtering.
+        - **discard_no_hit**: when `true`, contigs with no informative BLAST genus assignment are removed. This is the bacterial default.
+        - **include_genera** and **exclude_genera**: optional comma- or semicolon-separated genus lists applied to all samples.
+        - **include_genera_by_sample**: optional TSV file with columns `sample` and `genus`, useful when different samples in the same run belong to different target genera.
+        - **exclude_genera_file**: optional plain-text file listing genera to remove, one per line or as comma-/semicolon-separated values.
+        - **sample_overrides**: optional TSV file with columns `sample`, `mode`, `include_genera`, `exclude_genera`, and `discard_no_hit`. Use it to correct only specific samples without changing global settings.
+
+        The selector writes `contig_taxonomy_decisions.tsv` next to `contigs.list`, so each kept or removed contig can be audited.
 
 [⬆ Back to Table of Contents](#table-of-contents)
 
@@ -311,16 +329,16 @@ snakemake --sdm conda --cores 50
 ## Output
 The workflow output reflects the steps described in the [description](#description) section. Here's a breakdown of the subdirectories created within the main output folder, along with explanations of their contents:
 
-- `01.pre-processing`: Long reads trimmed and filtered by [Filtlong](https://github.com/rrwick/Filtlong) (v0.2.1). [NanoPlot](https://github.com/wdecoster/NanoPlot) (v1.46.2) is used to generate a report on the quality of the original and filtered reads, which can be found in the `read_qc` sub-directory.
+- `01.pre-processing`: Long reads trimmed and filtered by [Filtlong](https://github.com/rrwick/Filtlong) (v0.3.1). [NanoPlot](https://github.com/wdecoster/NanoPlot) (v1.46.2) is used to generate a report on the quality of the original and filtered reads, which can be found in the `read_qc` sub-directory.
 
-- `02.assembly`: Long-read assembly performed by [Flye](https://github.com/fenderglass/Flye) (v2.9.4).
+- `02.assembly`: Long-read assembly performed by [Flye](https://github.com/fenderglass/Flye) (v2.9.6).
 
 - `03.post-processing`: Contains the following sub-directories:
     - **fix_start**: Replicons are reoriented by [dnaapler](https://github.com/gbouras13/dnaapler) (v1.3.0) as follows: bacterial chromosomes will start with the *dnaA* gene, plasmids with *repA* and phages with *terL*.
     - **mapping_evaluation**: Filtered long reads are mapped back to contigs with [minimap2](https://github.com/lh3/minimap2) (v2.30). The resulting BAM files are processed with [samtools](https://github.com/samtools/samtools) (v1.21). Mapping statistics are generated with [QualiMap](https://qualimap.bioinfo.cipf.es/) (v2.3).
     - **contaminants**: Assembled contig selection based on [BLAST+](https://blast.ncbi.nlm.nih.gov/doc/blast-help/) (v2.16.0) search and [BlobTools](https://github.com/DRL/blobtools) (1.1.1) analysis. Check the `composition` text file for a quick overview of the relative composition of your assembly.
-    - **consensus**: Contigs are error corrected with long reads using [Medaka](https://github.com/nanoporetech/medaka) (v2.2.0). This step is optional and can be skipped by setting the `medaka_model` parameter to `FALSE` in the `config.yaml` file. See the [description](#description) section for more details.
-    - **completenness_evaluation**: [CheckM](https://github.com/Ecogenomics/CheckM) (1.2.4) output based on long-read assembled contigs, after reorientation, decontamination, and error correction.
+    - **consensus**: Contigs are error corrected with long reads using [Medaka](https://github.com/nanoporetech/medaka) (v2.2.2). This step is optional and can be skipped by setting the `medaka_model` parameter to `FALSE` in the `config.yaml` file. See the [description](#description) section for more details.
+    - **completeness_evaluation**: [CheckM](https://github.com/Ecogenomics/CheckM) (1.2.4) output based on long-read assembled contigs, after reorientation, decontamination, and error correction.
 
 - `04.taxonomy`: Taxonomic placement performed by [GTDB-Tk](https://github.com/Ecogenomics/GTDBTk) (v2.6.1).
 
@@ -335,7 +353,7 @@ The workflow output reflects the steps described in the [description](#descripti
 - `07.plasmids`: Contigs are screened for the presence of plasmid replicons with [Platon](https://github.com/oschwengers/platon) (v1.7) and results verified by BLAST search to avoid false positive. Contigs ascertained as plasmids are reported in the `verified plasmids` file.
 
 - `08.phages`: Contigs are screened for the presence of viral sequences using [VirSorter2](https://github.com/jiarong/VirSorter2) (v2.2.4), followed by [CheckV](https://bitbucket.org/berkeleylab/checkv/src/master/) (v1.0.3) for refinement:
-    - **virsorter**: Following the instructions provided [here](https://www.protocols.io/view/viral-sequence-identification-sop-with-virsorter2-5qpvoyqebg4o/v3?step=3), viral groups (i.e. dsDNA phage, NCLDV, RNA, ssDNA, and lavidaviridae) are detected with a loose cutoff of 0.5 for maximal sensitivity. Original sequences of circular and (near) fully viral contigs are preserved and passed to the next tool.
+    - **virsorter**: Following the instructions provided [here](https://www.protocols.io/view/viral-sequence-identification-sop-with-virsorter2-5qpvoyqebg4o/v3?step=3), viral groups (_i.e._ dsDNA phage, NCLDV, RNA, ssDNA, and lavidaviridae) are detected with a loose cutoff of 0.5 for maximal sensitivity. Original sequences of circular and (near) fully viral contigs are preserved and passed to the next tool.
     - **checkv**: This second step serves to quality control the results of the previous step to avoid the presence of non-viral sequences (false positive) and to trim potential host regions left at the ends of proviruses.
 
 - `09.report`: [MultiQC](https://github.com/MultiQC/MultiQC) (v1.33) is used to parse and aggregate the results of the following tools:
