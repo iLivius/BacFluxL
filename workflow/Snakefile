@@ -5,7 +5,7 @@ __  __  |  __ `/  ___/_  /_   __  /_  / / /_  |/_/_  /
 _  /_/ // /_/ // /__ _  __/   _  / / /_/ /__>  < _  /___
 /_____/ \__,_/ \___/ /_/      /_/  \__,_/ /_/|_| /_____/
                                                                                                             
-BacFluxL v1.2.0
+BacFluxL v1.2.1
 Genomic Analysis of Bacterial ONT Reads
 
 Livio Antonielli, June 2026
@@ -32,6 +32,7 @@ PLATONDB = config['directories']['platon_db']
 
 # ABRicate screens the final assembly against each database listed here.
 DATABASES = ["argannot", "card", "ecoh", "ecoli_vf", "megares", "ncbi", "resfinder", "vfdb"]
+DATABASE_PATTERN = "|".join(DATABASES)
 
 # Global resources and helper paths. Some rules cap CPU use where more threads
 # do not improve runtime.
@@ -970,34 +971,34 @@ rule cazyme_gene_cluster:
       --db_dir {params.dbcan_db} >> {log} 2>&1
     """
 
-for sample in SAMPLES:
-  for db in DATABASES:
-    rule:
-      input:
-        final_contigs = expand("03.post-processing/final/{sample}/assembly_final.fasta", sample = sample)
-      output:
-        amr_tab = expand("06.AMR/ABRicate/{sample}/{db}.tsv", sample = sample, db = db)
-      params:
-        db = db,
-        minid = 80,
-        mincov = 70
-      conda:
-        "envs/abricate.yaml"
-      message:
-        "--- ABRicate: AMR detection. ---"
-      log:
-        expand("logs/amr_{db}_in_{sample}_contigs.log", sample = sample, db = db)
-      priority: 4
-      shell:
-        """
-        abricate \
-          --db {params.db} \
-          {input.final_contigs} \
-          --minid {params.minid} \
-          --mincov {params.mincov} \
-          --nopath \
-          --quiet > {output.amr_tab} 2> {log}
-        """
+rule amr_contigs:
+  input:
+    final_contigs = "03.post-processing/final/{sample}/assembly_final.fasta"
+  output:
+    amr_tab = "06.AMR/ABRicate/{sample}/{db}.tsv"
+  wildcard_constraints:
+    db = DATABASE_PATTERN
+  params:
+    db = lambda wc: wc.db,
+    minid = 80,
+    mincov = 70
+  conda:
+    "envs/abricate.yaml"
+  message:
+    "--- ABRicate: AMR detection ({wildcards.db}). ---"
+  log:
+    "logs/amr_{db}_in_{sample}_contigs.log"
+  priority: 4
+  shell:
+    """
+    abricate \
+      --db {params.db:q} \
+      {input.final_contigs:q} \
+      --minid {params.minid} \
+      --mincov {params.mincov} \
+      --nopath \
+      --quiet > {output.amr_tab:q} 2> {log:q}
+    """
  
 rule AMR_summary:
   input:

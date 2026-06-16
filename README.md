@@ -11,7 +11,7 @@ __  __  |  __ `/  ___/_  /_   __  /_  / / /_  |/_/_  /
 _  /_/ // /_/ // /__ _  __/   _  / / /_/ /__>  < _  /___
 /_____/ \__,_/ \___/ /_/      /_/  \__,_/ /_/|_| /_____/
                                                                                                             
-BacFluxL v1.2.0
+BacFluxL v1.2.1
 
 June 2026
 ```
@@ -308,6 +308,7 @@ Before running `BacFluxL`, you must edit the `config.yaml` file with a text edit
         - **sample_overrides**: optional TSV file with columns `sample`, `mode`, `include_genera`, `exclude_genera`, and `discard_no_hit`. Use it to correct only specific samples without changing global settings.
 
         The selector writes `contig_taxonomy_decisions.tsv` next to `contigs.list`, so each kept or removed contig can be audited.
+        In `auto` and `include` modes, the selector also treats selected genus aliases and retained legacy prefixes as equivalent to reduce false removal caused by BLAST/BlobTools assignments across related or recently reclassified genera. For example, `Bacillus` can retain `Paenibacillus`, `Arthrobacter` can retain `Pseudarthrobacter`, `Pseudoarthrobacter`, or `Paenarthrobacter`, and `Burkholderia` can retain `Paraburkholderia`. Alias-based decisions are marked in `contig_taxonomy_decisions.tsv` with reasons such as `auto_genus_alias` or `included_genus_alias`. `exclude` mode remains exact, because broad alias removal could otherwise remove legitimate target contigs. These aliases are heuristic safeguards, not a formal taxonomic reconciliation system.
 
 [⬆ Back to Table of Contents](#table-of-contents)
 
