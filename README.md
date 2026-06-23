@@ -2,7 +2,7 @@
 A workflow for genomic analysis of bacterial long reads sequenced with Oxford Nanopore Technologies (ONT).
 
 [![Snakemake](https://img.shields.io/badge/snakemake-≥9.10.1-brightgreen.svg)](https://snakemake.readthedocs.io/en/stable/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11243909.svg)](https://doi.org/10.5281/zenodo.11243909)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20723428.svg)](https://doi.org/10.5281/zenodo.20723428)
 
 ```bash
 ________             _______________             ______
